@@ -1,0 +1,28 @@
+<view class="page">
+  <view class="brand">
+    <text>VocaBuddy</text>
+    <text class="session">Session: {{sessionShort}}</text>
+  </view>
+  <view class="header">
+    <view class="actions">
+      <button class="btn ghost" size="mini" loading="{{clearing}}" bindtap="onClearMemory">Clear</button>
+      <button class="btn" size="mini" bindtap="onNewSession">New</button>
+    </view>
+  </view>
+  
+  <scroll-view class="chat" scroll-y="true" scroll-with-animation="true" scroll-into-view="{{lastMessageId}}">
+    <block wx:for="{{messages}}" wx:key="id">
+      <view id="msg-{{item.id}}" class="message {{item.role}}">
+        <text class="bubble">{{item.text}}</text>
+      </view>
+    </block>
+    <view class="message bot" wx:if="{{sending}}">
+      <text class="bubble">Thinking…</text>
+    </view>
+  </scroll-view>
+
+  <view class="composer">
+    <input class="input" placeholder="Type a message..." value="{{inputText}}" confirm-type="send" bindconfirm="onSend" bindinput="onInput" />
+    <button class="send" loading="{{sending}}" bindtap="onSend" disabled="{{sending}}">Send</button>
+  </view>
+</view> 

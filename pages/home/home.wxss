@@ -1,0 +1,12 @@
+.home { min-height: 100vh; height: 100%; background: linear-gradient(180deg, #111827 0%, #1f2937 40%, #f5f7fb 40%, #f5f7fb 100%); }
+.hero { padding: 80rpx 32rpx 40rpx; color:#fff; }
+.brand { font-size: 48rpx; font-weight: 800; }
+.tagline { margin-top: 12rpx; color:#cbd5e1; font-size: 26rpx; }
+.card { margin: -40rpx 24rpx 24rpx; padding: 28rpx; background:#fff; border-radius: 16rpx; box-shadow: 0 8rpx 24rpx rgba(0,0,0,0.08); }
+.card-title { font-size: 28rpx; color:#6b7280; }
+.word { display:block; margin-top: 10rpx; font-size: 44rpx; font-weight: 700; color:#111827; }
+.meta { display:block; margin-top: 6rpx; color:#6b7280; }
+.desc { display:block; margin-top: 12rpx; color:#374151; line-height: 1.6; }
+.actions { display:flex; gap: 16rpx; margin-top: 20rpx; }
+.primary { background:#111827; color:#fff; border-radius: 12rpx; }
+.history { display:inline-block; padding: 16rpx 24rpx; background:#f3f4f6; color:#111827; border-radius: 12rpx; }

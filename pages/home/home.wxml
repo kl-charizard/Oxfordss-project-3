@@ -1,0 +1,17 @@
+<view class="home page">
+  <view class="hero">
+    <text class="brand">VocaBuddy</text>
+    <text class="tagline">Learn smarter, one word a day.</text>
+  </view>
+
+  <view class="card">
+    <text class="card-title">Today's Suggestion</text>
+    <text class="word">{{suggestion.word}}</text>
+    <text class="meta">Topic: {{suggestion.topic}} · Level: {{suggestion.level}}</text>
+    <text class="desc">{{suggestion.hint}}</text>
+    <view class="actions">
+      <button class="primary" bindtap="goChat">Start Chat</button>
+      <navigator class="history" url="/pages/history/history">History</navigator>
+    </view>
+  </view>
+</view> 

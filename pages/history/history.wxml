@@ -1,0 +1,17 @@
+<view class="history">
+  <view class="header">
+    <text class="title">Learning History</text>
+    <button size="mini" bindtap="onClear">Clear</button>
+  </view>
+  <block wx:for="{{items}}" wx:key="ts">
+    <view class="row">
+      <view class="left">
+        <text class="word">{{item.word}}</text>
+        <text class="meta">{{item.topic}} · {{item.level}}</text>
+        <text class="hint">{{item.hint}}</text>
+      </view>
+      <text class="time">{{item.time}}</text>
+    </view>
+  </block>
+  <view wx:if="{{items.length === 0}}" class="empty">No history yet.</view>
+</view> 
