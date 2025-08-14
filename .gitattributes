@@ -1,0 +1,1 @@
+Vocabbuddy/models/word_embeddings.npy filter=lfs diff=lfs merge=lfs -text
