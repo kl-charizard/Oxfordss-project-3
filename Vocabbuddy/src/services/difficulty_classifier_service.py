@@ -59,14 +59,41 @@ class DifficultyClassifierService:
         Returns:
             str: The predicted difficulty level (e.g., 'Easy', 'Medium', 'Hard').
         """
-        # Extract features for the given word
-        features = self._extract_features(word)
-        
-        # The model expects a DataFrame with specific column names.
-        input_df = pd.DataFrame(
-            [features], 
-            columns=["Word length", "Number of Syllables", "Word Frequency"]
-        )
+        # Extract raw features
+        length, syllables, freq_score = self._extract_features(word)
+
+        # Build a mapping of canonical feature names → values
+        canonical_values = {
+            "word length": length,
+            "no. of syllables": syllables,
+            "number of syllables": syllables,
+            "word frequency": freq_score,
+        }
+
+        # If the model carries its expected feature names, align to them exactly
+        if hasattr(self.model, "feature_names_in_"):
+            expected = list(self.model.feature_names_in_)
+            row = []
+            for name in expected:
+                key_norm = str(name).strip().lower()
+                if key_norm in canonical_values:
+                    row.append(canonical_values[key_norm])
+                else:
+                    # Try a few alias fallbacks
+                    if key_norm.replace("no.", "number").strip() in canonical_values:
+                        row.append(canonical_values[key_norm.replace("no.", "number").strip()])
+                    elif key_norm.replace("number", "no.").strip() in canonical_values:
+                        row.append(canonical_values[key_norm.replace("number", "no.").strip()])
+                    else:
+                        # Default safe fallback
+                        row.append(0.0)
+            input_df = pd.DataFrame([row], columns=expected)
+        else:
+            # Fallback to original column names used previously
+            input_df = pd.DataFrame(
+                [[length, syllables, freq_score]],
+                columns=["Word length", "Number of Syllables", "Word Frequency"],
+            )
         
         # Make the prediction
         prediction = self.model.predict(input_df)[0]

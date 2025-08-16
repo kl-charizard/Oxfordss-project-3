@@ -46,7 +46,8 @@ Page({
 
     request.post('/chat', {
       session_id: this.data.sessionId,
-      message: text
+      message: text,
+      mode: 'chat'
     })
     .then((res) => {
       const reply = res && res.reply ? String(res.reply) : 'No reply';

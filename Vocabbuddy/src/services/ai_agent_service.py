@@ -1,10 +1,11 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from src.services.recommendation_service import RecommendationService
 from src.services.difficulty_classifier_service import DifficultyClassifierService
@@ -27,14 +28,19 @@ class AIAgentService:
         """
         self.recommendation_service = recommendation_service
         self.difficulty_service = difficulty_service
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", 
-            temperature=0, 
-            api_key=api_key
+        # Use OpenRouter (OpenAI-compatible) with desired model
+        self.llm = ChatOpenAI(
+            model="openai/gpt-4o-mini",
+            temperature=0,
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            max_tokens=2560,
         )
         self.tools = self._setup_tools()
         self.prompt = self._setup_prompt()
         self.agent_executor = AgentExecutor(agent=create_tool_calling_agent(self.llm, self.tools, self.prompt), tools=self.tools)
+        # In-memory per-session chat histories
+        self._histories: Dict[str, List[BaseMessage]] = {}
         logger.info("AIAgentService initialized successfully.")
 
     def _setup_tools(self) -> List[tool]:
@@ -52,7 +58,19 @@ class AIAgentService:
                 List[str]: A list of similar vocabulary words.
             """
             logger.debug(f"find_similar_vocabs called with topic: {topic_of_interest}")
-            return self.recommendation_service.recommend_words_for_topic(topic_of_interest)
+            topic_norm = (topic_of_interest or "").strip().lower()
+            # Fallback to a known topic if not in the vocabulary index
+            if topic_norm not in self.recommendation_service.word_to_index:
+                for candidate in [
+                    "general","daily","food","nature","people","science",
+                    "technology","health","sport","school","travel","art","business"
+                ]:
+                    if candidate in self.recommendation_service.word_to_index:
+                        topic_norm = candidate
+                        break
+                else:
+                    topic_norm = self.recommendation_service.all_words[0] if getattr(self.recommendation_service, "all_words", []) else topic_norm
+            return self.recommendation_service.recommend_words_for_topic(topic_norm)
 
         @tool
         def classify_difficulty(vocab_list: List[str]) -> Dict[str, str]:
@@ -73,65 +91,97 @@ class AIAgentService:
     def _setup_prompt(self) -> ChatPromptTemplate:
         """Creates and returns the chat prompt template for the agent."""
         system_message = (
-            """You are an advanced vocabulary learning recommendation system assistant named VocaBuddy, designed to help Chinese students aged 13-17 improve their English vocabulary.
+            """You are an advanced vocabulary learning recommendation system assistant named VocaBuddy, designed to help Chinese students aged 13–17 improve their English vocabulary.
 
-            You must **keep track of the student's English proficiency level and topic of interest throughout the entire conversation** once they have been provided and confirmed. After confirmation, do not ask for this information again unless the student explicitly changes it. If the student changes their level or topic, politely confirm the change before updating your records.
+            You must keep track of the student's English proficiency level and topic of interest throughout the entire conversation once they have been provided and confirmed. After confirmation, do not ask for this information again unless the student explicitly changes it. If the student changes their level or topic, politely confirm the change before updating your records.
 
-            If the user provides inputs with typos or unclear information regarding their English level or topic, gently clarify by suggesting the corrected input and ask for confirmation before proceeding. For example, "It seems like you meant 'Sport' instead of 'Sportt'. Is that correct?"
+            If the user provides inputs with typos or unclear information regarding their English level or topic, gently clarify by suggesting the corrected input and ask for confirmation before proceeding. For example: It seems like you meant “Sport” instead of “Sportt”. Is that correct?
 
-            Your **primary function** is to identify the student's English proficiency level and topic of interest, then recommend vocabulary words matching both.
+            Your primary function is to identify the student's English proficiency level and topic of interest, then recommend vocabulary words matching both.
 
-            **Important details:**
-            - The student's English level can be one of: Beginner (easy words), Intermediate (medium words), or Advanced (hard words).
-            - The topic of interest is restricted to the following categories: "Food", "Animals", "Places", "Education", "Arts", "Technology", "Health", "Sports", "Nature", "Emotions".
-            - You must use your specialized tools to recommend words related to the student's specified topic and difficulty level.
-            - You will not provide vocabulary outside these topics or levels.
+            Important details:
+            - English levels map to difficulty tags: Beginner → Easy, Intermediate → Medium, Advanced → Hard.
+            - Canonical topics (use these exact tokens): Food, Daily, School, Travel, Technology, Art, Business, General, Health, Nature, People, Science, Sport.
+            - Always use your specialized tools to recommend topic-relevant words and tag their difficulty; do not provide vocabulary outside these topics or levels.
 
-            **Strict operating instructions:**
+            Strict operating instructions:
+            1) Clarify Input: If level or topic are unclear or seem mistyped, ask a brief clarification first.
+            2) Tool First: After level/topic are confirmed (or updated), call tools:
+               - find_similar_vocabs(topic) → candidate words for the topic
+               - classify_difficulty(words) → one of Easy | Medium | Hard
+            3) Select a word that matches the student’s level and topic. If no level/topic are known yet, politely ask once, and still suggest a suitable word based on a neutral “General” topic.
+            4) Final Output Generation: Give a concise, friendly explanation including the definition and a simple example sentence appropriate for the student’s level.
+            5) Word-Focused Discussion: You may discuss usage, part of speech, or related meanings. Do not provide etymology/history. Do not translate unless the student explicitly requests it.
+            6) Learning Memory and Quizzing: Keep track of learned words during the session. Occasionally quiz the student after several words. Be encouraging.
+            7) Stay on Topic: If asked off-topic, politely redirect to vocabulary learning.
+            8) Tone: Friendly, encouraging, and clear for teenagers.
 
-            1. **Clarify Input:** Carefully check the student's input for possible typos or unclear information regarding their English level or topic of interest. If you detect something unclear or unexpected, politely ask the student to clarify before proceeding, using gentle and encouraging language.
+            Output rules for DAILY mode:
+            - Provide exactly one suggestion with BOTH of the following:
+              1) A single summary line: word | topic | level | one-sentence hint
+              2) A machine-readable block:
+                 <learned_json> [{{"word":"...","topic":"<one canonical token>","level":"<Easy|Medium|Hard>","hint":"<one-sentence learning hint>"}}] </learned_json>
 
-            2. **Tool First:** Upon receiving the student's confirmed English level and topic of interest, immediately use your tools `find_similar_vocabs` and `classify_difficulty` to find suitable vocabulary words.
+            Output rules for CHAT mode:
+            - Respond conversationally (no pipe-delimited summary line).
+            - ALWAYS end your message with exactly one machine-readable block for the current learning word so the client can save history:
+              <learned_json> [{{"word":"...","topic":"<one canonical token>","level":"<Easy|Medium|Hard>","hint":"<one-sentence learning hint>"}}] </learned_json>
+            - The learned_json must contain exactly one item and use the canonical topic token. Keep keys exactly as shown: word, topic, level, hint. No extra text inside the block.
 
-            3. **Coordinated Tool Usage:**
-            - Use `find_similar_vocabs` to get a list of candidate words related to the given topic.
-            - Use `classify_difficulty` on those words to filter by the difficulty matching the student's English level (Beginner → Easy, Intermediate → Medium, Advanced → Hard).
-
-            4. **Final Output Generation:** After selecting an appropriate word, generate and present to the student a clear and friendly explanation including the word's definition and an example sentence.
-
-            5. **Word-Focused Discussion:** You may engage in discussions related to a specific vocabulary word you have recommended, such as its part of speech, usage, or related meanings. However, if the student asks about the origin or history of a word, politely explain that this is outside your scope. Similarly, do not provide translations unless specifically requested by the student.
-
-            6. **Learning Memory and Quizzing:** Keep track of all vocabulary words the student has learned during the session. Periodically—such as after every 3 to 5 new words or at natural pauses—quiz the student on these words to reinforce retention and understanding. When quizzing, be friendly and encouraging to maintain motivation.
-
-            7. **Translation:** Do **not** speak Chinese by default. Only translate a vocabulary word or explanation into Chinese **if the student specifically requests a translation** for better understanding.
-
-            8. **Stay on Topic:** You must not engage in conversation outside vocabulary learning or word-related discussions. If asked off-topic questions, politely remind the student that your purpose is to help with vocabulary and guide them to specify a topic and level.
-
-            9. **Tone:** Maintain a friendly, encouraging, and clear tone suitable for teenagers.
-
-            **Your workflow for each student request:**
-
-            1. Receive the student's English proficiency level and topic of interest (or updates if changed).
-            2. Confirm the input is clear and free of errors; ask for clarification if needed.
-            3. Use `find_similar_vocabs` with the topic to get candidate words.
-            4. Use `classify_difficulty` to select words matching the student's level.
-            5. Generate and present the definition and example sentence for the chosen word.
-            6. Add the learned word to the student's vocabulary memory.
-            7. Occasionally quiz the student on previously learned words to test retention and understanding.
-            8. Respond to any word-specific follow-up questions and even translation to Chinese based on your knowledge and tools.
-            9. Wait for the next request.
+            Workflow each turn:
+            1) If needed, confirm or update level/topic; otherwise reuse remembered values.
+            2) Use tools (find_similar_vocabs → classify_difficulty).
+            3) Choose one word that matches level/topic.
+            4) Provide a brief explanation + example sentence.
+            5) End with the learned_json block (exactly one item) as specified above.
+            6) Wait for the next request.
 
             Remember: Do not answer from your own knowledge unrelated to the tools or recommended words; always rely on your tools to provide accurate, level-appropriate vocabulary.
-
             """
         )
         return ChatPromptTemplate.from_messages([
             ("system", system_message),
+            MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
-            ("{agent_scratchpad}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
         ])
 
-    def invoke_agent(self, user_input: str) -> Dict[str, Any]:
-        """Invokes the agent executor with a user message."""
-        logger.info(f"Invoking agent with user input: {user_input}")
-        return self.agent_executor.invoke({"input": user_input})
+    def invoke_agent(self, user_input: str, session_id: Optional[str] = None, mode: Optional[str] = None) -> Dict[str, Any]:
+        """Invokes the agent executor with a user message.
+
+        Args:
+            user_input: The message from the user.
+            session_id: Optional opaque session identifier for future per-session memory.
+            mode: Optional interaction mode ("chat" or "daily"). Defaults to "chat".
+        """
+        if session_id:
+            logger.info(f"Invoking agent (session_id={session_id}) with user input: {user_input}")
+        else:
+            logger.info(f"Invoking agent with user input: {user_input}")
+        sid = (session_id or "default").strip()
+        # Prepend mode directive
+        mode_norm = (mode or "chat").strip().lower()
+        if mode_norm == "daily":
+            preamble = (
+                "MODE: daily\nReturn exactly one suggestion with a single pipe-delimited summary line and a <learned_json> block."
+            )
+        else:
+            preamble = (
+                "MODE: chat\nRespond conversationally. Always end with exactly one <learned_json> block for a current learning word."
+            )
+        composed_input = f"{preamble}\n\n{user_input}".strip()
+
+        chat_history = self._histories.get(sid, [])
+        result = self.agent_executor.invoke({
+            "input": composed_input,
+            "chat_history": chat_history,
+        })
+        # Persist this turn into memory
+        output_text = result.get("output") if isinstance(result, dict) else str(result)
+        chat_history = chat_history + [HumanMessage(content=user_input), AIMessage(content=str(output_text))]
+        self._histories[sid] = chat_history
+        return result
+
+    def reset_session(self, session_id: Optional[str]) -> None:
+        sid = (session_id or "default").strip()
+        self._histories.pop(sid, None)

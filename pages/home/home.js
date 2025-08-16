@@ -22,7 +22,8 @@ Page({
     try {
       const res = await request.post('/chat', {
         session_id: sessionId,
-        message: 'Give me one daily vocabulary suggestion: pick a random topic and level, output as: word | topic | level | one-sentence hint.'
+        message: 'Give me one daily vocabulary suggestion: pick a random topic and level, output as: word | topic | level | one-sentence hint.',
+        mode: 'daily'
       });
 
       // 1) Prefer structured payload from server
